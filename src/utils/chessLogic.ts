@@ -285,8 +285,17 @@ export function checkGameStatus(board: ChessboardState, player: Player): GameSta
   return isInCheck ? 'check' : 'playing';
 }
 
+// Importing strategy types and sample strategies
+import { StrategyTip, allStrategies, openingStrategies, middlegameStrategies, endgameStrategies } from './chessStrategies';
+
 // Generate AI move based on difficulty
-export function generateAIMove(board: ChessboardState, difficulty: 'beginner' | 'intermediate' | 'advanced' = 'beginner'): Move {
+export interface AIMoveResult {
+  move: Move;
+  strategyApplied?: StrategyTip | null;
+  reason?: string; 
+}
+
+export function generateAIMove(board: ChessboardState, difficulty: 'beginner' | 'intermediate' | 'advanced' = 'beginner'): AIMoveResult {
   const possibleMoves: Move[] = [];
   
   // Collect all possible moves for black pieces
@@ -310,107 +319,135 @@ export function generateAIMove(board: ChessboardState, difficulty: 'beginner' | 
     const newBoard = makeMove(board, move);
     return !isKingInCheck(newBoard, 'black');
   });
-  
-  // If no legal moves, return any move (will result in checkmate)
-  if (legalMoves.length === 0) return possibleMoves[0];
-  
+
+  if (legalMoves.length === 0) {
+    // Should ideally not happen if game status is checked correctly before calling
+    return { move: possibleMoves[0] || { from: {row:0,col:0}, to: {row:0,col:0} }, reason: "No legal moves available." };
+  }
+
+  let bestMove: Move = legalMoves[0];
+  let strategyApplied: StrategyTip | null = null;
+  let reason: string = "Making a general move.";
+
   if (difficulty === 'beginner') {
-    // Simple logic for beginner AI: Choose a random move, but prefer captures
-    const capturingMoves = legalMoves.filter(move => 
-      board[move.to.row][move.to.col] !== '' && 
+    const capturingMoves = legalMoves.filter(move =>
+      board[move.to.row][move.to.col] !== '' &&
       board[move.to.row][move.to.col] === board[move.to.row][move.to.col].toUpperCase()
     );
-    
+
     if (capturingMoves.length > 0) {
-      return capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
+      bestMove = capturingMoves[Math.floor(Math.random() * capturingMoves.length)];
+      reason = "Capturing an opponent's piece.";
+      // Potentially link to a general capture strategy if one exists
+    } else {
+      bestMove = legalMoves[Math.floor(Math.random() * legalMoves.length)];
+      reason = "Making a random available move.";
     }
-    
-    return legalMoves[Math.floor(Math.random() * legalMoves.length)];
   } else if (difficulty === 'intermediate') {
-    // Intermediate AI: Use a simple scoring system
     const scoredMoves = legalMoves.map(move => {
       let score = 0;
-      
-      // Piece values for captured pieces
-      const pieceValues: {[key: string]: number} = {
-        'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0
-      };
-      
-      // Prioritize captures based on piece value
+      let currentReason = "";
+      let currentStrategy: StrategyTip | null = null;
+
+      const pieceValues: {[key: string]: number} = { 'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 0 };
+      const movingPieceType = board[move.from.row][move.from.col].toLowerCase();
+
       if (board[move.to.row][move.to.col] !== '') {
         const capturedPiece = board[move.to.row][move.to.col].toUpperCase();
         score += pieceValues[capturedPiece] * 10;
+        currentReason = "Capturing a piece.";
       }
-      
-      // Bonus for controlling center squares
+
       if ((move.to.row === 3 || move.to.row === 4) && (move.to.col === 3 || move.to.col === 4)) {
         score += 2;
+        currentReason = currentReason ? currentReason + " and controlling the center." : "Controlling the center.";
+        currentStrategy = openingStrategies.find(s => s.id === 'opening-center') || null;
       }
       
-      // Bonus for developing pieces
-      const movingPiece = board[move.from.row][move.from.col].toLowerCase();
-      if ((movingPiece === 'n' || movingPiece === 'b') && move.from.row === 0 && move.to.row > 0) {
+      // Check for castling (simplified: king moves two squares)
+      if (movingPieceType === 'k' && Math.abs(move.to.col - move.from.col) === 2) {
+        score += 4; // Bonus for castling
+        currentReason = "Castling for king safety.";
+        currentStrategy = openingStrategies.find(s => s.id === 'opening-castle') || null;
+      }
+
+      if ((movingPieceType === 'n' || movingPieceType === 'b') && move.from.row === 0 && move.to.row > 0) { // Black's pieces start at row 0 and 1
         score += 3;
+        currentReason = currentReason ? currentReason + " and developing a piece." : "Developing a piece.";
+        if (!currentStrategy) currentStrategy = openingStrategies.find(s => s.id === 'opening-develop') || null;
       }
       
-      return { move, score };
+      // Add a small bonus for checks
+      const tempBoardCheck = makeMove(board, move);
+      if (isKingInCheck(tempBoardCheck, 'white')) {
+        score += 1;
+        currentReason = currentReason ? currentReason + " and delivering a check." : "Delivering a check.";
+      }
+
+      return { move, score, reason: currentReason, strategy: currentStrategy };
     });
-    
-    // Sort by score and pick one of the top 3 moves
+
     scoredMoves.sort((a, b) => b.score - a.score);
-    const topMoves = scoredMoves.slice(0, Math.min(3, scoredMoves.length));
-    return topMoves[Math.floor(Math.random() * topMoves.length)].move;
-  } else {
-    // Advanced AI: More sophisticated evaluation
+    const topChoice = scoredMoves[0];
+    bestMove = topChoice.move;
+    reason = topChoice.reason || "Applying a tactical or positional improvement.";
+    strategyApplied = topChoice.strategy;
+
+  } else { // Advanced
+    // More sophisticated evaluation (can be expanded significantly)
     const scoredMoves = legalMoves.map(move => {
       let score = 0;
-      
-      // Material evaluation
-      const pieceValues: {[key: string]: number} = {
-        'p': -1, 'n': -3, 'b': -3, 'r': -5, 'q': -9, 'k': -100,
-        'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 100
-      };
-      
-      // Capture evaluation - higher priority than in intermediate
+      let currentReason = "";
+      let currentStrategy: StrategyTip | null = null;
+      const pieceValues: {[key: string]: number} = { 'p': -1, 'n': -3, 'b': -3, 'r': -5, 'q': -9, 'k': -100, 'P': 1, 'N': 3, 'B': 3, 'R': 5, 'Q': 9, 'K': 100 };
+      const movingPieceType = board[move.from.row][move.from.col].toLowerCase();
+
       if (board[move.to.row][move.to.col] !== '') {
         const capturedPiece = board[move.to.row][move.to.col];
         score += Math.abs(pieceValues[capturedPiece]) * 15;
+        currentReason = "Capturing a valuable piece.";
       }
-      
-      // Simulate the move to evaluate position
+
       const newBoard = makeMove(board, move);
-      
-      // Check if we put opponent in check
       if (isKingInCheck(newBoard, 'white')) {
         score += 5;
-        
-        // Check if it might be checkmate (simplified check)
-        const canOpponentMove = canPlayerMove(newBoard, 'white');
-        if (!canOpponentMove) {
-          score += 100; // High priority for checkmate moves
+        currentReason = currentReason ? currentReason + " and putting the opponent in check." : "Putting the opponent in check.";
+        if (!canPlayerMove(newBoard, 'white')) {
+          score += 1000; // Checkmate is the goal
+          currentReason = "Aiming for checkmate!";
         }
       }
       
-      // Positional evaluation - control of center
-      const controlScore = evaluateBoardControl(newBoard);
-      score += controlScore;
-      
-      // Piece development and mobility
-      const mobilityScore = evaluateMobility(newBoard);
-      score += mobilityScore;
-      
-      // Pawn structure evaluation
-      const pawnScore = evaluatePawnStructure(newBoard);
-      score += pawnScore;
-      
-      return { move, score };
+      // Castling for black (king at (0,4))
+      if (movingPieceType === 'k' && move.from.row === 0 && move.from.col === 4 && Math.abs(move.to.col - move.from.col) === 2) {
+        score += 8; // Higher bonus for castling in advanced
+        currentReason = "Castling for king safety.";
+        currentStrategy = openingStrategies.find(s => s.id === 'opening-castle') || null;
+      }
+
+      score += evaluateBoardControl(newBoard); // Prefers black control
+      if (evaluateBoardControl(newBoard) > 0 && !currentStrategy) {
+         currentStrategy = allStrategies.find(s => s.id === 'opening-center' || s.id === 'middlegame-activity');
+         if(currentStrategy && !currentReason) currentReason = "Improving piece activity and control.";
+      }
+      score += evaluateMobility(newBoard); // Prefers black mobility
+      score += evaluatePawnStructure(newBoard); // Prefers good black pawn structure
+      if (evaluatePawnStructure(newBoard) > 0 && !currentStrategy) {
+        currentStrategy = allStrategies.find(s => s.id === 'middlegame-pawnstructure' || s.id === 'endgame-passed-pawns');
+        if(currentStrategy && !currentReason) currentReason = "Improving pawn structure.";
+      }
+
+
+      return { move, score, reason: currentReason, strategy: currentStrategy };
     });
-    
-    // Sort by score and pick one of the top moves (with some randomness)
+
     scoredMoves.sort((a, b) => b.score - a.score);
-    const topMoves = scoredMoves.slice(0, Math.min(5, scoredMoves.length));
-    return topMoves[Math.floor(Math.random() * topMoves.length)].move;
+    const topChoice = scoredMoves[0];
+    bestMove = topChoice.move;
+    reason = topChoice.reason || "Making a strategically sound move.";
+    strategyApplied = topChoice.strategy;
   }
+  return { move: bestMove, strategyApplied, reason };
 }
 
 // Helper for advanced AI: Check if a player can make any legal move
@@ -582,141 +619,126 @@ function evaluatePawnStructure(board: ChessboardState): number {
 }
 
 // Get move explanation for a given move
-export function getAIMoveExplanation(board: ChessboardState, move: Move): string {
+export function getAIMoveExplanation(board: ChessboardState, aiMoveData: AIMoveResult): string {
+  const { move, strategyApplied, reason } = aiMoveData;
   const piece = board[move.from.row][move.from.col].toLowerCase();
   const isCapture = board[move.to.row][move.to.col] !== '';
-  const isCheck = isKingInCheck(makeMove(board, move), 'white');
-  
-  const explanations = {
-    p: [
-      "I moved my pawn forward to control more space on the board.",
-      "Advancing this pawn helps me develop my pieces.",
-      "This pawn move helps control important central squares."
-    ],
-    r: [
-      "I moved my rook to control this file.",
-      "Rooks work best on open files where they can move freely.",
-      "I positioned my rook to attack your pieces along this line."
-    ],
-    n: [
-      "Knights are powerful when placed in the center of the board.",
-      "My knight now controls several important squares.",
-      "Knights can jump over pieces, making them valuable in closed positions."
-    ],
-    b: [
-      "Bishops are effective along diagonals.",
-      "This bishop now controls a long diagonal.",
-      "I've developed my bishop to influence the center."
-    ],
-    q: [
-      "The queen is powerful but needs to be used carefully.",
-      "My queen is now positioned to threaten multiple squares.",
-      "I've moved my queen to a more active position."
-    ],
-    k: [
-      "King safety is important in chess.",
-      "I've moved my king to a safer square.",
-      "This move helps protect my king."
-    ]
-  };
-  
-  let explanation = explanations[piece][Math.floor(Math.random() * explanations[piece].length)];
-  
-  // If it's a capture or check, add that information
-  if (isCapture) {
-    explanation = `I captured your piece to gain material advantage. ${explanation}`;
+  const tempBoard = makeMove(board, move); // Create a temporary board *after* the AI's move
+  const isCheck = isKingInCheck(tempBoard, 'white'); // Check if the AI's move puts white in check
+
+  let explanation = "";
+
+  if (strategyApplied) {
+    explanation = `I'm applying the strategy: "${strategyApplied.name}". ${strategyApplied.description.substring(0, 100)}${strategyApplied.description.length > 100 ? '...' : ''}`;
+  } else if (reason) {
+    explanation = `My reasoning: ${reason}`;
+  } else {
+    // Fallback to older generic explanations if no specific reason/strategy
+    const genericExplanations: {[key: string]: string[]} = {
+      p: ["Moving my pawn to control space.", "Advancing this pawn for development."],
+      r: ["Positioning my rook on an open file.", "Activating my rook."],
+      n: ["Moving my knight to a more central or active square.", "My knight is looking for outposts."],
+      b: ["My bishop is now controlling this diagonal.", "Developing my bishop."],
+      q: ["The queen is being brought into a more active role.", "My queen is now threatening multiple squares."],
+      k: ["Ensuring my king's safety.", "My king is part of the endgame plan."]
+    };
+    explanation = genericExplanations[piece]?.[Math.floor(Math.random() * (genericExplanations[piece]?.length || 1))] || "I've made my move.";
   }
-  
+
+  if (isCapture && !explanation.toLowerCase().includes("capture") && !explanation.toLowerCase().includes(strategyApplied?.name.toLowerCase() || "capture")) {
+    explanation += " This also involves a capture.";
+  }
   if (isCheck) {
     explanation += " Your king is now in check!";
   }
-  
-  return explanation;
+
+  return explanation.trim();
 }
 
 // Get move suggestion for the player
-export function getSuggestion(board: ChessboardState): { move: Move, explanation: string } {
+export function getSuggestion(board: ChessboardState): { move: Move, explanation: string, strategyApplied?: StrategyTip | null } {
   // Simplified suggestion algorithm for beginners
-  const possibleMoves: { move: Move, score: number }[] = [];
+  const possibleMoves: { move: Move, score: number, reason?: string, strategy?: StrategyTip | null }[] = [];
   
   // Collect all possible moves for white pieces and score them
   for (let row = 0; row < 8; row++) {
     for (let col = 0; col < 8; col++) {
       const piece = board[row][col];
-      if (piece !== '' && piece === piece.toUpperCase()) {
+      if (piece !== '' && piece === piece.toUpperCase()) { // White's pieces
         const moves = getPossibleMoves(board, { row, col });
         moves.forEach(to => {
-          // Check if the move is legal (doesn't leave king in check)
-          const newBoard = makeMove(board, { from: { row, col }, to });
-          if (!isKingInCheck(newBoard, 'white')) {
+          const tempBoard = makeMove(board, { from: { row, col }, to });
+          if (!isKingInCheck(tempBoard, 'white')) { // Legal move for white
             let score = 0;
-            
-            // Basic scoring: prefer captures and center control for beginners
-            if (board[to.row][to.col] !== '') {
-              // Capturing opponent's piece (simple material value)
+            let reason = "";
+            let strategy: StrategyTip | null = null;
+            const movingPieceType = piece.toLowerCase();
+
+            // Scoring logic similar to AI's intermediate
+            if (board[to.row][to.col] !== '') { // Is it a capture?
               const capturedPiece = board[to.row][to.col].toLowerCase();
-              switch (capturedPiece) {
-                case 'p': score += 1; break;
-                case 'n': case 'b': score += 3; break;
-                case 'r': score += 5; break;
-                case 'q': score += 9; break;
+              const pieceValues: {[key: string]: number} = { 'p': 1, 'n': 3, 'b': 3, 'r': 5, 'q': 9 };
+              score += (pieceValues[capturedPiece] || 0) * 10;
+              reason = "Capturing an opponent's piece is often a good idea.";
+            }
+
+            if ((to.row === 3 || to.row === 4) && (to.col === 3 || to.col === 4)) { // Center control
+              score += 2;
+              reason = reason ? reason + " This also helps control the center." : "This move helps control the center.";
+              strategy = openingStrategies.find(s => s.id === 'opening-center') || null;
+            }
+            
+            // Castling for white (king at (7,4))
+            if (movingPieceType === 'k' && row === 7 && col === 4 && Math.abs(to.col - col) === 2) {
+                score += 4; // Bonus for castling
+                reason = "Castling gets your king to safety and develops a rook.";
+                strategy = openingStrategies.find(s => s.id === 'opening-castle') || null;
+            }
+
+
+            if ((movingPieceType === 'n' || movingPieceType === 'b') && (row === 7 || row === 6)) { // Minor piece development from starting rows
+              if ( (movingPieceType === 'n' && !(row === 7 && (col === 1 || col === 6))) || (movingPieceType === 'b' && !(row === 7 && (col === 2 || col === 5))) ) {
+                 // Allow if not on starting square already, or if it is, ensure it's a valid development
+              } else if (row === 7 && to.row < 7) { // Moved from starting rank
+                score += 3;
+                reason = reason ? reason + " It also develops a piece." : "Developing a piece is key in the opening.";
+                if (!strategy) strategy = openingStrategies.find(s => s.id === 'opening-develop') || null;
               }
             }
-            
-            // Bonus for controlling center
-            if ((to.row === 3 || to.row === 4) && (to.col === 3 || to.col === 4)) {
-              score += 0.5;
+
+            if (isKingInCheck(tempBoard, 'black')) { // Check opponent
+              score += 5; // Bonus for check
+              reason = reason ? reason + " Plus, it puts your opponent in check!" : "This move puts your opponent's king in check!";
             }
-            
-            // Development bonus for minor pieces
-            if ((piece === 'N' || piece === 'B') && (row === 7) && (to.row < 7)) {
-              score += 0.3;
-            }
-            
-            // Check bonus
-            if (isKingInCheck(newBoard, 'black')) {
-              score += 0.7;
-            }
-            
-            possibleMoves.push({ 
-              move: { from: { row, col }, to },
-              score
-            });
+
+            possibleMoves.push({ move: { from: { row, col }, to }, score, reason, strategy });
           }
         });
       }
     }
   }
-  
-  // Sort moves by score and pick the best one
+
   possibleMoves.sort((a, b) => b.score - a.score);
-  
-  // If we have good moves, choose the best one
+
   if (possibleMoves.length > 0) {
-    const bestMove = possibleMoves[0].move;
-    const piece = board[bestMove.from.row][bestMove.from.col].toUpperCase();
-    
-    let explanation = "";
-    
-    if (board[bestMove.to.row][bestMove.to.col] !== '') {
-      explanation = "This move captures your opponent's piece, which is usually a good idea in chess.";
-    } else if ((bestMove.to.row === 3 || bestMove.to.row === 4) && (bestMove.to.col === 3 || bestMove.to.col === 4)) {
-      explanation = "This move helps control the center of the board, which is a key chess principle.";
-    } else if ((piece === 'N' || piece === 'B') && (bestMove.from.row === 7)) {
-      explanation = "This move develops one of your pieces, getting them into the game. Development is important in the opening.";
-    } else if (isKingInCheck(makeMove(board, bestMove), 'black')) {
-      explanation = "This move puts your opponent's king in check.";
-    } else {
-      explanation = "This looks like a solid move that improves your position.";
+    const bestChoice = possibleMoves[0];
+    let finalExplanation = bestChoice.reason || "This looks like a solid move.";
+    if (bestChoice.strategy) {
+      finalExplanation = `Consider this move. ${bestChoice.reason ? bestChoice.reason + " " : ""}It aligns with the strategy: "${bestChoice.strategy.name}".`;
     }
-    
-    return { move: bestMove, explanation };
+    if (isKingInCheck(makeMove(board, bestChoice.move), 'black') && !finalExplanation.includes("check")) {
+        finalExplanation += " It also delivers a check to the opponent's king.";
+    }
+
+
+    return { move: bestChoice.move, explanation: finalExplanation.trim(), strategyApplied: bestChoice.strategy };
   }
-  
-  // Fallback
-  return { 
-    move: { from: { row: 6, col: 0 }, to: { row: 5, col: 0 } },
-    explanation: "I suggest moving a pawn forward to develop your position."
+
+  // Fallback suggestion
+  return {
+    move: { from: { row: 6, col: 4 }, to: { row: 4, col: 4 } }, // e.g., e2-e4
+    explanation: "Try moving a central pawn forward to open lines and control the center. (Strategy: Control the Center)",
+    strategyApplied: openingStrategies.find(s => s.id === 'opening-center') || null
   };
 }
 

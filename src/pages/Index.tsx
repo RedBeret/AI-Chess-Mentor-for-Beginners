@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { toast } from "sonner";
 import Chessboard from '@/components/Chessboard';
@@ -15,7 +14,10 @@ import {
   generateAIMove,
   getAIMoveExplanation,
   getSuggestion,
-  toAlgebraic
+  toAlgebraic,
+  AIMoveResult, // Import AIMoveResult
+  checkGameStatus,
+  GameStatus
 } from '@/utils/chessLogic';
 
 const Index = () => {
@@ -23,10 +25,9 @@ const Index = () => {
   const [board, setBoard] = useState<ChessboardState>(initialBoard);
   const [currentPlayer, setCurrentPlayer] = useState<'white' | 'black'>('white');
   const [selectedMove, setSelectedMove] = useState<{ from: Position, possibleMoves: Position[] } | null>(null);
-  const [moveHistory, setMoveHistory] = useState<{ board: ChessboardState, move: Move }[]>([]);
-  const [lastAIMove, setLastAIMove] = useState<Move | null>(null);
-  const [moveExplanation, setMoveExplanation] = useState<string>('');
-  const [gameOver, setGameOver] = useState<boolean>(false);
+  const [moveHistory, setMoveHistory] = useState<{ board: ChessboardState, move: Move, algebraic: string }[]>([]); // Added algebraic to history
+  const [lastAIMoveResult, setLastAIMoveResult] = useState<AIMoveResult | null>(null); // Store full AIMoveResult
+  const [gameStatus, setGameStatus] = useState<GameStatus>('playing');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const isMobile = useIsMobile();
   
@@ -71,52 +72,58 @@ const Index = () => {
 
   // Handle player move
   const handlePlayerMove = (move: Move) => {
-    if (currentPlayer !== 'white' || gameOver) return;
-    
-    // Check if it's a capture move
+    if (currentPlayer !== 'white' || gameStatus !== 'playing') return;
+
     const isCapture = board[move.to.row][move.to.col] !== '';
-    
-    // Execute move
     const newBoard = makeMove(board, move);
+    const algebraicMove = toAlgebraic(move.from) + '-' + toAlgebraic(move.to); // Basic algebraic notation
+
     setBoard(newBoard);
-    // Record move in history
-    setMoveHistory([...moveHistory, { board, move }]);
-    // Switch to AI's turn
-    setCurrentPlayer('black');
-
-    // Clear selected move info
-    setSelectedMove(null);
-    
-    // Play appropriate sound
+    setMoveHistory([...moveHistory, { board, move, algebraic: algebraicMove }]);
     playSound(isCapture);
-    
-    toast.success("Move made! Now it's the AI's turn.");
 
-    // AI will respond after a short delay
-    setTimeout(() => makeAIMove(newBoard), 1000);
+    const currentStatus = checkGameStatus(newBoard, 'black'); // Check status for black (AI)
+    setGameStatus(currentStatus);
+
+    if (currentStatus === 'playing' || currentStatus === 'check') {
+      setCurrentPlayer('black');
+      setSelectedMove(null);
+      toast.success("Move made! Now it's the AI's turn.");
+      setTimeout(() => makeAIMove(newBoard), 1000);
+    } else {
+      // Handle checkmate/stalemate/draw by player
+      setSelectedMove(null);
+      toast.info(`Game Over: ${currentStatus}`);
+    }
   };
 
   // AI makes a move
   const makeAIMove = (currentBoard: ChessboardState) => {
+    if (gameStatus !== 'playing' && gameStatus !== 'check') return; // AI shouldn't move if game is over
+
     try {
-      const aiMove = generateAIMove(currentBoard);
-      const explanation = getAIMoveExplanation(currentBoard, aiMove);
-      
-      // Check if it's a capture move
-      const isCapture = currentBoard[aiMove.to.row][aiMove.to.col] !== '';
-      
-      const newBoard = makeMove(currentBoard, aiMove);
-      
+      const aiMoveResult = generateAIMove(currentBoard, 'intermediate'); // Using intermediate for better strategy display
+      const explanation = getAIMoveExplanation(currentBoard, aiMoveResult);
+      const isCapture = currentBoard[aiMoveResult.move.to.row][aiMoveResult.move.to.col] !== '';
+      const newBoard = makeMove(currentBoard, aiMoveResult.move);
+      const algebraicMove = toAlgebraic(aiMoveResult.move.from) + '-' + toAlgebraic(aiMoveResult.move.to);
+
       setBoard(newBoard);
-      setMoveHistory([...moveHistory, { board: currentBoard, move: aiMove }]);
-      setLastAIMove(aiMove);
-      setMoveExplanation(explanation);
-      setCurrentPlayer('white');
-      
-      // Play appropriate sound
+      setMoveHistory([...moveHistory, { board: currentBoard, move: aiMoveResult.move, algebraic: algebraicMove }]);
+      setLastAIMoveResult(aiMoveResult); // Store the full result
+      // setMoveExplanation(explanation); // This is now handled by AIMentor directly via lastAIMoveResult
       playSound(isCapture);
-      
-      toast.info("AI has made its move. Your turn!");
+
+      const currentStatus = checkGameStatus(newBoard, 'white'); // Check status for white (Player)
+      setGameStatus(currentStatus);
+
+      if (currentStatus === 'playing' || currentStatus === 'check') {
+        setCurrentPlayer('white');
+        toast.info("AI has made its move. Your turn!");
+      } else {
+        toast.info(`Game Over: ${currentStatus}`);
+      }
+
     } catch (error) {
       console.error("Error making AI move:", error);
       toast.error("There was an error with the AI move. Starting a new game.");
@@ -131,11 +138,19 @@ const Index = () => {
 
   // Request a hint from the AI mentor
   const handleRequestHint = () => {
+    if (gameStatus !== 'playing' && gameStatus !== 'check') {
+        toast.info("Game is over, no hints available.");
+        return;
+    }
     const suggestion = getSuggestion(board);
     const from = toAlgebraic(suggestion.move.from);
     const to = toAlgebraic(suggestion.move.to);
     
-    toast.info(`Try moving from ${from} to ${to}. ${suggestion.explanation}`);
+    let hintMessage = `Hint: Try moving from ${from} to ${to}.`;
+    if (suggestion.explanation) {
+      hintMessage += ` ${suggestion.explanation}`;
+    }
+    toast.info(hintMessage, { duration: 8000 }); // Longer duration for hints
   };
 
   // Start a new game
@@ -144,16 +159,16 @@ const Index = () => {
     setCurrentPlayer('white');
     setSelectedMove(null);
     setMoveHistory([]);
-    setLastAIMove(null);
-    setMoveExplanation('');
-    setGameOver(false);
+    setLastAIMoveResult(null); // Reset AI move result
+    // setMoveExplanation(''); // No longer needed here
+    setGameStatus('playing'); // Reset game status
     toast.success("New game started! You're playing as white.");
   };
 
   // Get highlighted squares based on the last AI move
   const getHighlightedSquares = (): Position[] => {
-    if (!lastAIMove) return [];
-    return [lastAIMove.from, lastAIMove.to];
+    if (!lastAIMoveResult?.move) return [];
+    return [lastAIMoveResult.move.from, lastAIMoveResult.move.to];
   };
 
   return (
@@ -179,19 +194,21 @@ const Index = () => {
                 onMoveRequest={handleMoveRequest}
                 highlightedSquares={getHighlightedSquares()}
                 currentPlayer={currentPlayer}
+                disabled={gameStatus !== 'playing' && gameStatus !== 'check'} // Disable board if game over
               />
               
               {/* AI Mentor placed directly under the chessboard */}
               <div className="w-full mt-4">
                 <AIMentor 
                   board={board}
-                  lastMove={lastAIMove}
-                  moveExplanation={moveExplanation}
+                  lastAIMoveResult={lastAIMoveResult} // Pass the full AIMoveResult
+                  // moveExplanation={moveExplanation} // Remove this, AIMentor will derive it
                   onRequestHint={handleRequestHint}
                   currentPlayer={currentPlayer}
                   showStrategyTip={!isMobile}
                   soundEnabled={soundEnabled}
                   onToggleSound={handleToggleSound}
+                  gameStatus={gameStatus} // Pass game status
                 />
               </div>
             </div>
@@ -205,7 +222,10 @@ const Index = () => {
           {/* Game status */}
           <div className="mt-4 text-center">
             <h2 className="text-xl font-semibold">
-              {gameOver ? "Game Over" : `Current player: ${currentPlayer === 'white' ? 'You (White)' : 'AI (Black)'}`}
+              {gameStatus !== 'playing' && gameStatus !== 'check' ? 
+                `Game Over: ${gameStatus.charAt(0).toUpperCase() + gameStatus.slice(1)}` : 
+                `Current player: ${currentPlayer === 'white' ? 'You (White)' : 'AI (Black)'}`}
+              {gameStatus === 'check' && ` (${currentPlayer === 'white' ? 'Your' : "AI's"} king is in check!)`}
             </h2>
           </div>
         </div>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { 
@@ -13,32 +12,33 @@ import { Volume2, VolumeX, BookOpen, HelpCircle } from 'lucide-react';
 import { 
   getRandomStrategy, 
   getStrategyByPhase, 
-  getStrategyByDifficulty,
+  // getStrategyByDifficulty, // Not directly used here anymore, but keep for chessStrategies.ts utility
   ChessPhase,
   StrategyTip
 } from '@/utils/chessStrategies';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { AIMoveResult, GameStatus } from '@/utils/chessLogic'; // Import AIMoveResult and GameStatus
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"; // Added import for Select components
 
 interface AIMentorProps {
   board: ChessboardState;
-  lastMove: Move | null;
-  moveExplanation: string;
+  lastAIMoveResult: AIMoveResult | null; // Changed from lastMove and moveExplanation
   onRequestHint: () => void;
   currentPlayer: 'white' | 'black';
   showStrategyTip?: boolean;
   soundEnabled: boolean;
   onToggleSound: () => void;
+  gameStatus: GameStatus; // Add gameStatus prop
 }
 
 const AIMentor: React.FC<AIMentorProps> = ({ 
   board, 
-  lastMove, 
-  moveExplanation, 
+  lastAIMoveResult, 
   onRequestHint,
   currentPlayer,
   showStrategyTip = true,
   soundEnabled,
-  onToggleSound
+  onToggleSound,
+  gameStatus // Destructure gameStatus
 }) => {
   const [currentTip, setCurrentTip] = useState<StrategyTip>(getRandomStrategy());
   const [selectedPhase, setSelectedPhase] = useState<ChessPhase>('general');
@@ -53,10 +53,22 @@ const AIMentor: React.FC<AIMentorProps> = ({
     }
   };
   
-  // Change tip when phase selection changes
+  // Change tip when phase selection changes or game phase might change
   useEffect(() => {
+    // Potentially adjust selectedPhase based on game progress (e.g., move count)
+    // For now, manual selection is kept.
     handleNewTip();
   }, [selectedPhase]);
+
+  const getAIMoveDisplayExplanation = () => {
+    if (!lastAIMoveResult) return "";
+    if (lastAIMoveResult.strategyApplied) {
+      return `AI applied strategy: "${lastAIMoveResult.strategyApplied.name}". Reason: ${lastAIMoveResult.reason || lastAIMoveResult.strategyApplied.description}`;
+    }
+    return lastAIMoveResult.reason || "AI made its move.";
+  };
+
+  const aiMoveDisplayExplanation = getAIMoveDisplayExplanation();
 
   return (
     <Card className="w-full">
@@ -74,10 +86,10 @@ const AIMentor: React.FC<AIMentorProps> = ({
       </CardHeader>
       <CardContent className="space-y-4">
         {/* Last AI move explanation */}
-        {moveExplanation && (
+        {aiMoveDisplayExplanation && (
           <div className="p-3 bg-secondary/50 rounded-lg">
             <h3 className="font-semibold mb-1">AI's last move:</h3>
-            <p>{moveExplanation}</p>
+            <p className="text-sm">{aiMoveDisplayExplanation}</p>
           </div>
         )}
 
@@ -120,8 +132,8 @@ const AIMentor: React.FC<AIMentorProps> = ({
           </div>
         )}
 
-        {/* Help button for the player */}
-        {currentPlayer === 'white' && (
+        {/* Help button for the player - show only if game is ongoing and it's player's turn */}
+        {currentPlayer === 'white' && (gameStatus === 'playing' || gameStatus === 'check') && (
           <div className="flex justify-center">
             <Button onClick={onRequestHint} variant="default" className="flex gap-2 items-center">
               <HelpCircle className="h-4 w-4" />

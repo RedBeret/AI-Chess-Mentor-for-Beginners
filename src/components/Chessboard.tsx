@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from 'react';
 import ChessPiece from './ChessPiece';
 import { 
@@ -19,6 +18,7 @@ interface ChessboardProps {
   onMoveRequest: (moveRequest: { from: Position, possibleMoves: Position[] }) => void;
   highlightedSquares?: Position[];
   currentPlayer: 'white' | 'black';
+  disabled?: boolean; // Add disabled prop
 }
 
 const Chessboard: React.FC<ChessboardProps> = ({ 
@@ -26,7 +26,8 @@ const Chessboard: React.FC<ChessboardProps> = ({
   onMove, 
   onMoveRequest,
   highlightedSquares = [],
-  currentPlayer
+  currentPlayer,
+  disabled = false // Destructure and default disabled prop
 }) => {
   const [selectedPiece, setSelectedPiece] = useState<Position | null>(null);
   const [possibleMoves, setPossibleMoves] = useState<Position[]>([]);
@@ -38,6 +39,7 @@ const Chessboard: React.FC<ChessboardProps> = ({
   }, [currentPlayer]);
 
   const handleSquareClick = (row: number, col: number) => {
+    if (disabled) return; // Prevent action if disabled
     // If no piece is selected, select piece if it belongs to current player
     if (!selectedPiece) {
       const piece = board[row][col];
@@ -60,6 +62,7 @@ const Chessboard: React.FC<ChessboardProps> = ({
   };
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, row: number, col: number) => {
+    if (disabled) return; // Prevent action if disabled
     // Only allow dragging pieces that belong to current player
     const piece = board[row][col];
     if (piece !== '' && isPieceOfPlayer(piece, currentPlayer)) {
@@ -85,6 +88,7 @@ const Chessboard: React.FC<ChessboardProps> = ({
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>, row: number, col: number) => {
     e.preventDefault();
+    if (disabled) return; // Prevent action if disabled
     
     if (selectedPiece) {
       const moveToExecute = possibleMoves.find(move => move.row === row && move.col === col);
@@ -124,11 +128,12 @@ const Chessboard: React.FC<ChessboardProps> = ({
     }
 
     const coordinate = toAlgebraic({ row, col });
+    const canDrag = !disabled && piece !== '' && isPieceOfPlayer(piece, currentPlayer);
 
     return (
       <div 
         key={`${row}-${col}`}
-        className={`relative w-full h-full ${squareColor} ${highlightClass}`}
+        className={`relative w-full h-full ${squareColor} ${highlightClass} ${disabled ? 'cursor-not-allowed' : ''}`}
         onClick={() => handleSquareClick(row, col)}
         onDragOver={handleDragOver}
         onDrop={(e) => handleDrop(e, row, col)}
@@ -140,7 +145,7 @@ const Chessboard: React.FC<ChessboardProps> = ({
         
         <div 
           className="w-full h-full"
-          draggable={piece !== '' && isPieceOfPlayer(piece, currentPlayer)}
+          draggable={canDrag}
           onDragStart={(e) => handleDragStart(e, row, col)}
         >
           <ChessPiece 
