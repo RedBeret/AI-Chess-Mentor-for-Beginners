@@ -146,8 +146,10 @@ const AIMentor: React.FC<AIMentorProps> = ({
       </CardHeader>
 
       <CardContent className="space-y-3">
-        {/* API key banner / status */}
-        <ApiKeyBanner hasKey={apiKeyPresent} onKeyChange={() => setApiKeyPresent(hasApiKey())} />
+        {/* API key banner / status – hidden once the game is in progress */}
+        {moveCount === 0 && (
+          <ApiKeyBanner hasKey={apiKeyPresent} onKeyChange={() => setApiKeyPresent(hasApiKey())} />
+        )}
         {apiKeyPresent && (
           <div className="flex justify-end">
             <ApiKeyStatus onKeyChange={() => setApiKeyPresent(hasApiKey())} />
