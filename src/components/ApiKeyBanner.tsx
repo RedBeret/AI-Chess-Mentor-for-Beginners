@@ -27,17 +27,19 @@ const ApiKeyBanner: React.FC<ApiKeyBannerProps> = ({ hasKey, onKeyChange }) => {
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm">
-      <KeyRound className="h-4 w-4 text-amber-600 shrink-0" />
-      <span className="text-amber-800 shrink-0">Add your API key for live move coaching:</span>
-      <button
-        onClick={() => setVisible(false)}
-        className="text-amber-500 hover:text-amber-700 shrink-0 ml-auto"
-        title="Dismiss"
-      >
-        <X className="h-4 w-4" />
-      </button>
-      <div className="flex items-center gap-2 w-full">
+    <div className="flex flex-col gap-2 px-4 py-2 bg-amber-50 border border-amber-200 rounded-lg text-sm">
+      <div className="flex items-center gap-2">
+        <KeyRound className="h-4 w-4 text-amber-600 shrink-0" />
+        <span className="text-amber-800 flex-1">Add your API key for live move coaching:</span>
+        <button
+          onClick={() => setVisible(false)}
+          className="text-amber-500 hover:text-amber-700 shrink-0"
+          title="Dismiss"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+      <div className="flex items-center gap-2">
         <Input
           type="password"
           placeholder="sk-ant-..."
