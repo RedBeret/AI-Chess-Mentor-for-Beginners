@@ -1,5 +1,8 @@
 ## AI Chess Mentor for Beginners
 
+![TypeScript](https://img.shields.io/badge/TypeScript-blue?logo=typescript&logoColor=white) ![GitHub stars](https://img.shields.io/github/stars/RedBeret/AI-Chess-Mentor-for-Beginners?style=social)
+
+
 This project is a beginner-friendly chess application designed to help new players learn and improve their game with the assistance of AI-driven guidance.
 
 ## Local Development
