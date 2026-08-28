@@ -62,7 +62,7 @@ export function isPieceOfPlayer(piece: PieceType, player: Player): boolean {
 export function getPossibleMoves(board: ChessboardState, position: Position): Position[] {
   const { row, col } = position;
   const piece = board[row][col];
-  let moves: Position[] = [];
+  const moves: Position[] = [];
 
   if (piece === '') return moves;
 
